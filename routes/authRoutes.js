@@ -100,4 +100,63 @@ router.post("/loginleader", async (req, res) => {
   }
 });
 
+/* =========================
+   STUDENT EVENT REGISTER
+========================= */
+router.post("/studreg", async (req, res) => {
+  try {
+    const { id, name, registerno, degree, event1, event2 } = req.body;
+
+    // 1. Validate inputs
+    if (!id || !name || !registerno || !degree || !event1 || !event2) {
+      return res.status(400).json({ success: false, message: "All fields required" });
+    }
+
+    // 2. Event1 and Event2 must not be same
+    if (event1 === event2) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Event1 and Event2 should not be the same" 
+      });
+    }
+
+    // 3. Fetch leader (college & department)
+    const leader = await User.findOne({ id });
+    if (!leader) {
+      return res.status(404).json({ success: false, message: "Leader not found" });
+    }
+
+    const { college, department } = leader;
+
+    // 4. Prevent duplicate student registration under same leader
+    const existingStudent = await Event.findOne({ registerNumber: registerno, leaderId: id });
+    if (existingStudent) {
+      return res.status(400).json({ success: false, message: "Student already registered" });
+    }
+
+    // 5. Create new event registration
+    const newEvent = new Event({
+      leaderId: id,
+      name,
+      registerNumber: registerno,
+      degree,
+      college,
+      department,
+      event1,
+      event2
+    });
+
+    await newEvent.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Student registered for events successfully"
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 module.exports = router;
