@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const eventSchema = new mongoose.Schema({
-  id: { type: String, required: true },
+  leaderId: { type: String, required: true },
   name: { type: String, required: true },
   registerNumber: { type: String, required: true },
   degree: {
@@ -14,5 +14,6 @@ const eventSchema = new mongoose.Schema({
   event1: { type: String },
   event2: { type: String }
 }, { timestamps: true });
+
 
 module.exports = mongoose.model("Event", eventSchema);
