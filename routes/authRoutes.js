@@ -1,6 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
+const Event = require("../models/Event");
 const router = express.Router();
 
 /* =========================
@@ -192,5 +193,3 @@ router.post("/getcandidates", async (req, res) => {
 });
 
 module.exports = router;
-
-
