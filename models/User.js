@@ -20,5 +20,4 @@ const userSchema = new mongoose.Schema({
   plainpassword: { type: String, required: true }  // stored as requested (⚠️ not recommended in real prod)
 }, { timestamps: true });
 
-
 module.exports = mongoose.model("User", userSchema);
