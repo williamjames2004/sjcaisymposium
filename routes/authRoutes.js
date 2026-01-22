@@ -159,4 +159,37 @@ router.post("/studreg", async (req, res) => {
   }
 });
 
+/* =========================
+   GET CANDIDATES BY LEADER
+========================= */
+router.post("/getcandidates", async (req, res) => {
+  try {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({ success: false, message: "User ID required" });
+    }
+
+    const candidates = await Event.find({ leaderId: user_id });
+
+    if (!candidates || candidates.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No candidates found for this leader"
+      });
+    }
+
+    res.json({
+      success: true,
+      total: candidates.length,
+      data: candidates
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 module.exports = router;
+
