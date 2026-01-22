@@ -9,11 +9,8 @@ const eventSchema = new mongoose.Schema({
     enum: ["ug", "pg"],
     required: true
   },
-  email: { type: String, required: true },
-  mobilenumber: { type: String, required: true },
   event1: { type: String },
   event2: { type: String }
 }, { timestamps: true });
-
 
 module.exports = mongoose.model("Event", eventSchema);
