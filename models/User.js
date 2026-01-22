@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  id: { type: String, unique: true, required: true },
+  userid: { type: String, unique: true, required: true },
   name: { type: String, required: true },
   email: { type: String, unique: true, required: true },
   mobilenumber: { type: String, required: true },
@@ -19,5 +19,6 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },      // hashed
   plainpassword: { type: String, required: true }  // stored as requested (⚠️ not recommended in real prod)
 }, { timestamps: true });
+
 
 module.exports = mongoose.model("User", userSchema);
