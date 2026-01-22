@@ -43,7 +43,7 @@ router.post("/regleader", async (req, res) => {
 
     // 6. Save User
     const newUser = new User({
-      id: leaderId,
+      userid: leaderId,
       name,
       email,
       mobilenumber,
@@ -59,7 +59,7 @@ router.post("/regleader", async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Leader registered successfully",
-      id: leaderId
+      userid: leaderId
     });
 
   } catch (err) {
@@ -91,7 +91,7 @@ router.post("/loginleader", async (req, res) => {
 
     res.json({
       success: true,
-      id: user.id
+      userid: user.userid
     });
 
   } catch (err) {
@@ -121,7 +121,7 @@ router.post("/studreg", async (req, res) => {
     }
 
     // 3. Fetch leader (college & department)
-    const leader = await User.findOne({ id });
+    const leader = await User.findOne({ userid: id });
     if (!leader) {
       return res.status(404).json({ success: false, message: "Leader not found" });
     }
@@ -129,7 +129,7 @@ router.post("/studreg", async (req, res) => {
     const { college, department } = leader;
 
     // 4. Prevent duplicate student registration under same leader
-    const existingStudent = await Event.findOne({ registerNumber: registerno, leaderId: id });
+    const existingStudent = await Event.findOne({ registerNumber: registerno, leaderId: id});
     if (existingStudent) {
       return res.status(400).json({ success: false, message: "Student already registered" });
     }
@@ -192,4 +192,5 @@ router.post("/getcandidates", async (req, res) => {
 });
 
 module.exports = router;
+
 
