@@ -10,12 +10,22 @@ const router = express.Router();
 ========================= */
 router.post("/regleader", async (req, res) => {
   try {
-    const { name, email, mobilenumber, department, college, shift, password, confirmpassword } = req.body;
+    const {
+      name, email, mobilenumber,
+      department, college, shift,
+      password, confirmpassword
+    } = req.body;
 
+    // 1️⃣ Basic validation
     if (!name || !email || !mobilenumber || !department || !college || !shift || !password || !confirmpassword) {
       return res.status(400).json({ success: false, message: "All fields required" });
     }
 
+    if (password !== confirmpassword) {
+      return res.status(400).json({ success: false, message: "Passwords do not match" });
+    }
+
+    // 2️⃣ Prevent duplicate leader group
     const existingGroup = await User.findOne({ college, department, shift });
     if (existingGroup) {
       return res.status(400).json({
@@ -24,20 +34,20 @@ router.post("/regleader", async (req, res) => {
       });
     }
 
-    if (password !== confirmpassword) {
-      return res.status(400).json({ success: false, message: "Passwords do not match" });
-    }
-
+    // 3️⃣ Prevent duplicate email
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
       return res.status(400).json({ success: false, message: "Email already registered" });
     }
 
+    // 4️⃣ Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // 5️⃣ Generate leaderId
     const leaderId = "LD" + Date.now();
 
+    // 6️⃣ Save user
     const newUser = new User({
       userid: leaderId,
       name,
@@ -47,30 +57,48 @@ router.post("/regleader", async (req, res) => {
       college,
       shift,
       password: hashedPassword,
-      plainpassword: password
+      plainpassword: password // ⚠️ remove in real prod
     });
 
     await newUser.save();
 
-    // Create 15 empty event slots
-    const slots = [];
-    for (let i = 0; i < 15; i++) {
-      slots.push({ leaderId: leaderId });
-    }
-    await Event.insertMany(slots);
+    // 7️⃣ Create exactly 15 empty event slots
+    const slots = Array.from({ length: 15 }, () => ({
+      leaderId: leaderId
+    }));
 
-    res.status(200).json({
+    try {
+      await Event.insertMany(slots, { ordered: true });
+    } catch (eventErr) {
+      // 🔁 ROLLBACK user if slot creation fails
+      await User.deleteOne({ userid: leaderId });
+      throw eventErr;
+    }
+
+    // 8️⃣ Final success
+    res.status(201).json({
       success: true,
       message: "Leader registered successfully with 15 slots created",
       userid: leaderId
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server Error", error: err.message });
+    console.error("🔥 REGLEADER ERROR:", err);
+
+    // Mongo duplicate key (email / compound index)
+    if (err.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate entry. Leader already exists."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: err.message || "Server Error"
+    });
   }
 });
-
 /* =========================
    LOGIN LEADER
 ========================= */
@@ -236,3 +264,4 @@ router.post("/getcandidates", async (req, res) => {
 });
 
 module.exports = router;
+
