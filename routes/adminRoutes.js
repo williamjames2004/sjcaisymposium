@@ -77,13 +77,13 @@ router.post("/adminlogin", async (req, res) => {
 // Get all Event documents matching college+department+shift
 router.post("/viewteam", async (req, res) => {
   try {
-    const { college, department, shift } = req.body;
+    const { college, department } = req.body;
 
-    if (!college || !department || !shift) {
+    if (!college || !department) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    const team = await Event.find({ college, department, shift });
+    const team = await Event.find({ college, department });
 
     if (team.length === 0) {
       return res.status(404).json({ success: false, message: "No team found" });
