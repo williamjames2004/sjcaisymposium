@@ -11,43 +11,61 @@ const router = express.Router();
 router.post("/regleader", async (req, res) => {
   try {
     const {
-      name, email, mobilenumber,
-      department, college, shift,
-      password, confirmpassword
+      name,
+      email,
+      mobilenumber,
+      department,
+      college,
+      shift,
+      password,
+      confirmpassword
     } = req.body;
 
-    // 1️⃣ Basic validation
+    // 1️⃣ Validate input
     if (!name || !email || !mobilenumber || !department || !college || !shift || !password || !confirmpassword) {
-      return res.status(400).json({ success: false, message: "All fields required" });
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    if (password !== confirmpassword) {
-      return res.status(400).json({ success: false, message: "Passwords do not match" });
+    // 2️⃣ Check email uniqueness
+    const emailExists = await User.findOne({ email });
+    if (emailExists) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already registered"
+      });
     }
 
-    // 2️⃣ Prevent duplicate leader group
-    const existingGroup = await User.findOne({ college, department, shift });
-    if (existingGroup) {
+    // 3️⃣ Check college+department+shift uniqueness
+    const groupExists = await User.findOne({ college, department, shift });
+    if (groupExists) {
       return res.status(400).json({
         success: false,
         message: "Leader already exists for this College, Department and Shift"
       });
     }
 
-    // 3️⃣ Prevent duplicate email
-    const existingEmail = await User.findOne({ email });
-    if (existingEmail) {
-      return res.status(400).json({ success: false, message: "Email already registered" });
+    // 4️⃣ Check password match
+    if (password !== confirmpassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Passwords do not match"
+      });
     }
 
-    // 4️⃣ Hash password
+    // 5️⃣ Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 5️⃣ Generate leaderId
-    const leaderId = "LD" + Date.now();
+    // 6️⃣ Generate UNIQUE Leader ID
+    let leaderId;
+    let exists = true;
+    while (exists) {
+      leaderId = "LD" + Date.now() + Math.floor(Math.random() * 1000);
+      const check = await User.findOne({ userid: leaderId });
+      exists = !!check;
+    }
 
-    // 6️⃣ Save user
+    // 7️⃣ Create leader
     const newUser = new User({
       userid: leaderId,
       name,
@@ -57,45 +75,37 @@ router.post("/regleader", async (req, res) => {
       college,
       shift,
       password: hashedPassword,
-      plainpassword: password // ⚠️ remove in real prod
+      plainpassword: password // ⚠ dev only
     });
 
     await newUser.save();
 
-    // 7️⃣ Create exactly 15 empty event slots
+    // 8️⃣ Create 15 empty Event slots
     const slots = Array.from({ length: 15 }, () => ({
-      leaderId: leaderId
+      leaderId: leaderId,
+      name: null,
+      registerNumber: null,
+      department: null,
+      college: null,
+      degree: null,
+      event1: null,
+      event2: null
     }));
 
-    try {
-      await Event.insertMany(slots, { ordered: true });
-    } catch (eventErr) {
-      // 🔁 ROLLBACK user if slot creation fails
-      await User.deleteOne({ userid: leaderId });
-      throw eventErr;
-    }
+    await Event.insertMany(slots);
 
-    // 8️⃣ Final success
+    // 9️⃣ Success response
     res.status(201).json({
       success: true,
-      message: "Leader registered successfully with 15 slots created",
+      message: "Leader registered successfully & 15 slots created",
       userid: leaderId
     });
 
   } catch (err) {
-    console.error("🔥 REGLEADER ERROR:", err);
-
-    // Mongo duplicate key (email / compound index)
-    if (err.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: "Duplicate entry. Leader already exists."
-      });
-    }
-
+    console.error("Register Leader Error:", err);
     res.status(500).json({
       success: false,
-      message: err.message || "Server Error"
+      message: "Server error during registration"
     });
   }
 });
@@ -126,7 +136,8 @@ router.post("/loginleader", async (req, res) => {
     });
 
   } catch (err) {
-    res.status(500).json({ success: false, message: "Server Error", error: err.message});
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 });
 
@@ -137,7 +148,6 @@ router.put("/studreg", async (req, res) => {
   try {
     const { id, name, registerno, degree, event1, event2 } = req.body;
 
-    // 1️⃣ Basic Validation
     if (!id || !name || !registerno || !degree || !event1 || !event2) {
       return res.status(400).json({ success: false, message: "All fields required" });
     }
@@ -146,7 +156,6 @@ router.put("/studreg", async (req, res) => {
       return res.status(400).json({ success: false, message: "Event1 and Event2 must be different" });
     }
 
-    // 2️⃣ Validate Leader
     const leader = await User.findOne({ userid: id });
     if (!leader) {
       return res.status(404).json({ success: false, message: "Leader not found" });
@@ -154,60 +163,20 @@ router.put("/studreg", async (req, res) => {
 
     const { college, department } = leader;
 
-    // 3️⃣ Check if student already exists → UPDATE case
-    const existingStudent = await Event.findOne({ leaderId: id, registerNumber: registerno });
-
-    if (existingStudent) {
-      existingStudent.name = name;
-      existingStudent.degree = degree;
-      existingStudent.event1 = event1;
-      existingStudent.event2 = event2;
-
-      await existingStudent.save();
-
-      return res.json({
-        success: true,
-        message: "Student updated successfully"
-      });
+    const duplicate = await Event.findOne({ leaderId: id, registerNumber: registerno });
+    if (duplicate) {
+      return res.status(400).json({ success: false, message: "Student already registered" });
     }
 
-    // 4️⃣ SLOT SECURITY: ensure exactly 15 slots exist
-    const totalSlots = await Event.countDocuments({ leaderId: id });
+    const emptySlot = await Event.findOne({ leaderId: id, registerNumber: null });
 
-    if (totalSlots !== 15) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid slot configuration. Contact admin."
-      });
-    }
-
-    // 5️⃣ Prevent 16th insert
-    const filledCount = await Event.countDocuments({
-      leaderId: id,
-      registerNumber: { $ne: null }
-    });
-
-    if (filledCount >= 15) {
+    if (!emptySlot) {
       return res.status(400).json({
         success: false,
         message: "15 registrations complete. No slots available."
       });
     }
 
-    // 6️⃣ Fetch empty slot safely
-    const emptySlot = await Event.findOne({
-      leaderId: id,
-      registerNumber: null
-    });
-
-    if (!emptySlot) {
-      return res.status(400).json({
-        success: false,
-        message: "No empty slots available"
-      });
-    }
-
-    // 7️⃣ Assign Data
     emptySlot.name = name;
     emptySlot.registerNumber = registerno;
     emptySlot.degree = degree;
@@ -224,7 +193,8 @@ router.put("/studreg", async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    console.error(error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -259,9 +229,8 @@ router.post("/getcandidates", async (req, res) => {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
 module.exports = router;
-
