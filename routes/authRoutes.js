@@ -156,6 +156,7 @@ router.put("/studreg", async (req, res) => {
       return res.status(400).json({ success: false, message: "Event1 and Event2 must be different" });
     }
 
+    // Fetch leader details
     const leader = await User.findOne({ userid: id });
     if (!leader) {
       return res.status(404).json({ success: false, message: "Leader not found" });
@@ -163,17 +164,39 @@ router.put("/studreg", async (req, res) => {
 
     const { college, department } = leader;
 
-    const duplicate = await Event.findOne({ leaderId: id, registerNumber: registerno });
-    if (duplicate) {
-      return res.status(400).json({ success: false, message: "Student already registered" });
+    // 1️⃣ Check if student already exists → UPDATE
+    const existingStudent = await Event.findOne({
+      leaderId: id,
+      registerNumber: registerno
+    });
+
+    if (existingStudent) {
+      existingStudent.name = name;
+      existingStudent.degree = degree;
+      existingStudent.college = college;
+      existingStudent.department = department;
+      existingStudent.event1 = event1;
+      existingStudent.event2 = event2;
+
+      await existingStudent.save();
+
+      return res.json({
+        success: true,
+        message: "Student updated successfully",
+        data: existingStudent
+      });
     }
 
-    const emptySlot = await Event.findOne({ leaderId: id, registerNumber: null });
+    // 2️⃣ Else insert into empty slot
+    const emptySlot = await Event.findOne({
+      leaderId: id,
+      registerNumber: null
+    });
 
     if (!emptySlot) {
       return res.status(400).json({
         success: false,
-        message: "15 registrations complete. No slots available."
+        message: "Team is full. No slots available."
       });
     }
 
@@ -187,14 +210,15 @@ router.put("/studreg", async (req, res) => {
 
     await emptySlot.save();
 
-    res.json({
+    return res.json({
       success: true,
-      message: "Student registered successfully"
+      message: "Student registered successfully",
+      data: emptySlot
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("StudReg Error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -234,3 +258,4 @@ router.post("/getcandidates", async (req, res) => {
 });
 
 module.exports = router;
+
