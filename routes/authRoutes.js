@@ -94,6 +94,19 @@ router.post("/regleader", async (req, res) => {
     }));
 
     await Event.insertMany(slots);
+     
+/* ===================================================
+   🔥 UPDATE COLLEGE REGISTERED STATUS (ONLY ONCE)
+=================================================== */
+    await College.updateOne(
+      {
+        name: college,                 // or collegeId (preferred)
+        registeredStatus: false        // ✅ condition
+      },
+      {
+        $set: { registeredStatus: true }
+      }
+    );
 
     // 9️⃣ Success response
     res.status(201).json({
@@ -303,6 +316,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
