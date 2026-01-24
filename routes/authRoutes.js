@@ -284,10 +284,15 @@ router.post('/addcollege', async (req, res) => {
 router.get('/getcollege', async (req, res) => {
   try {
     const colleges = await College.find(
-      {},                       // no filter
-      { _id: 0, collegeId: 1, name: 1 } // only required fields
+      {},
+      { 
+        _id: 0, 
+        collegeId: 1, 
+        name: 1,
+        district: 1,
+        registeredStatus: 1  // Add this field to your College model if not exists
+      }
     ).sort({ name: 1 });
-
     res.status(200).json(colleges);
   } catch (error) {
     res.status(500).json({
@@ -298,5 +303,6 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
