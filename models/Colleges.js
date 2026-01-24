@@ -6,7 +6,6 @@ const CollegeSchema = new mongoose.Schema(
     name: { type: String, required: true },
     state: { type: String, required: true },
     district: { type: String, required: true },
-    city: { type: String, required: true },
 
     // ✅ Optional field (NOT required)
     registeredStatus: {
@@ -19,3 +18,4 @@ const CollegeSchema = new mongoose.Schema(
 
 
 module.exports = mongoose.model('College', CollegeSchema);
+
