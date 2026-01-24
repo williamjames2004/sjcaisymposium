@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const Event = require("../models/Event");
+const College = require("../models/Colleges");
 
 const router = express.Router();
 
@@ -257,5 +258,45 @@ router.post("/getcandidates", async (req, res) => {
   }
 });
 
+// POST - Add multiple colleges
+router.post('/addcollege', async (req, res) => {
+  try {
+    const colleges = req.body; // expecting array
+
+    if (!Array.isArray(colleges)) {
+      return res.status(400).json({ message: 'Send array of colleges' });
+    }
+
+    const result = await College.insertMany(colleges, { ordered: false });
+
+    res.status(201).json({
+      message: 'Colleges added successfully',
+      count: result.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error adding colleges',
+      error: error.message
+    });
+  }
+});
+// GET - Fetch colleges
+router.get('/getcollege', async (req, res) => {
+  try {
+    const colleges = await College.find(
+      {},                       // no filter
+      { _id: 0, collegeId: 1, name: 1 } // only required fields
+    ).sort({ name: 1 });
+
+    res.status(200).json(colleges);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error fetching colleges',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
+
 
