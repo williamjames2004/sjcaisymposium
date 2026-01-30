@@ -160,79 +160,123 @@ router.post("/loginleader", async (req, res) => {
 ========================= */
 router.put("/studreg", async (req, res) => {
   try {
-    const { id, name, registerno, degree, event1, event2 } = req.body;
+    const { id, name, registerno, degree, event1 } = req.body;
 
-    if (!id || !name || !registerno || !degree || !event1 || !event2) {
-      return res.status(400).json({ success: false, message: "All fields required" });
+    if (!id || !name || !registerno || !degree || !event1) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required"
+      });
     }
 
-    if (event1 === event2) {
-      return res.status(400).json({ success: false, message: "Event1 and Event2 must be different" });
-    }
-
-    // Fetch leader details
+    // Fetch leader
     const leader = await User.findOne({ userid: id });
     if (!leader) {
-      return res.status(404).json({ success: false, message: "Leader not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Leader not found"
+      });
     }
 
     const { college, department } = leader;
 
-    // 1️⃣ Check if student already exists → UPDATE
-    const existingStudent = await Event.findOne({
+    const EVENT_SLOT_MAP = {
+      "Fixathon": "1",
+      "Mute Masters": "1",
+      "Treasure Titans": "1",
+      "Bid Mayhem": "BOTH",
+      "QRush": "2",
+      "VisionX": "2",
+      "ThinkSync": "2",
+      "Crazy Sell": "2"
+    };
+
+    const slot = EVENT_SLOT_MAP[event1];
+    if (!slot) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event selected"
+      });
+    }
+
+    // 🔍 Fetch existing registrations of this participant
+    const existingRegs = await Event.find({
       leaderId: id,
       registerNumber: registerno
     });
 
-    if (existingStudent) {
-      existingStudent.name = name;
-      existingStudent.degree = degree;
-      existingStudent.college = college;
-      existingStudent.department = department;
-      existingStudent.event1 = event1;
-      existingStudent.event2 = event2;
-
-      await existingStudent.save();
-
-      return res.json({
-        success: true,
-        message: "Student updated successfully",
-        data: existingStudent
-      });
-    }
-
-    // 2️⃣ Else insert into empty slot
-    const emptySlot = await Event.findOne({
-      leaderId: id,
-      registerNumber: null
-    });
-
-    if (!emptySlot) {
-      return res.status(400).json({
+    // ❌ Already in Bid Mayhem → block everything
+    if (existingRegs.some(e => e.slot === "BOTH")) {
+      return res.status(409).json({
         success: false,
-        message: "Team is full. No slots available."
+        message: "Participants in Bid Mayhem cannot register for other events"
       });
     }
 
-    emptySlot.name = name;
-    emptySlot.registerNumber = registerno;
-    emptySlot.degree = degree;
-    emptySlot.college = college;
-    emptySlot.department = department;
-    emptySlot.event1 = event1;
-    emptySlot.event2 = event2;
+    // ❌ Trying to register Bid Mayhem after other events
+    if (slot === "BOTH" && existingRegs.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Bid Mayhem cannot be registered along with other events"
+      });
+    }
 
-    await emptySlot.save();
+    // ❌ Max 2 events rule
+    if (existingRegs.length >= 2) {
+      return res.status(409).json({
+        success: false,
+        message: "A participant can register for only two events"
+      });
+    }
+
+    // ❌ Same slot conflict
+    if (existingRegs.some(e => e.slot === slot)) {
+      return res.status(409).json({
+        success: false,
+        message: "Time slot conflict: participant already registered in this slot"
+      });
+    }
+
+    // ❌ Duplicate same event
+    if (existingRegs.some(e => e.event === event1)) {
+      return res.status(409).json({
+        success: false,
+        message: "Participant already registered for this event"
+      });
+    }
+
+    // ✅ Save registration
+    const entry = await Event.create({
+      leaderId: id,
+      name,
+      registerNumber: registerno,
+      college,
+      department,
+      degree,
+      event: event1,
+      slot
+    });
 
     return res.json({
       success: true,
-      message: "Student registered successfully",
-      data: emptySlot
+      message: "Participant registered successfully",
+      data: entry
     });
 
   } catch (error) {
     console.error("StudReg Error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Duplicate registration detected"
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 });
 
@@ -316,6 +360,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
