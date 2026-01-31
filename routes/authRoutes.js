@@ -143,14 +143,16 @@ router.post("/loginleader", async (req, res) => {
 });
 
 /* =========================
-   🔥 CHANGED FROM PUT TO POST
    STUDENT EVENT REGISTER (POST)
+   NEW RULES:
+   - One team per event per leader
+   - Max 15 unique students per leader
+   - Bid Mayhem blocks both slots
 ========================= */
 router.post("/studreg", async (req, res) => {
   try {
     const { id, name, registerno, degree, event1 } = req.body;
 
-    // Validate required fields
     if (!id || !name || !registerno || !degree || !event1) {
       return res.status(400).json({
         success: false,
@@ -169,7 +171,6 @@ router.post("/studreg", async (req, res) => {
 
     const { college, department } = leader;
 
-    // Check if leader has required fields
     if (!college || !department) {
       return res.status(400).json({
         success: false,
@@ -196,6 +197,31 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
+    // 🔥 NEW: Check if this event already has a team registered by this leader
+    const eventTeamExists = await EventRegistration.findOne({
+      leaderId: id,
+      event: event1
+    });
+
+    if (eventTeamExists) {
+      return res.status(409).json({
+        success: false,
+        message: `Your team is already registered for ${event1}. Only one team per event is allowed.`
+      });
+    }
+
+    // 🔥 NEW: Check total unique students registered by this leader
+    const allRegistrations = await EventRegistration.find({ leaderId: id });
+    const uniqueStudents = new Set(allRegistrations.map(r => r.registerNumber));
+    
+    // If this is a new student (not already in the set), check the limit
+    if (!uniqueStudents.has(registerno) && uniqueStudents.size >= 15) {
+      return res.status(409).json({
+        success: false,
+        message: `Maximum 15 unique students allowed per department. You have already registered ${uniqueStudents.size} students.`
+      });
+    }
+
     // 🔍 Fetch existing registrations of this participant
     const existingRegs = await EventRegistration.find({
       leaderId: id,
@@ -218,7 +244,7 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // ❌ Max 2 events rule
+    // ❌ Max 2 events rule per student
     if (existingRegs.length >= 2) {
       return res.status(409).json({
         success: false,
@@ -234,7 +260,7 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // ❌ Duplicate same event
+    // ❌ Duplicate same event (redundant now due to one-team-per-event check, but keep for safety)
     if (existingRegs.some(e => e.event === event1)) {
       return res.status(409).json({
         success: false,
@@ -242,7 +268,7 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // ✅ Create new registration (POST creates new document)
+    // ✅ Create new registration
     const entry = await EventRegistration.create({
       leaderId: id,
       name,
@@ -263,7 +289,6 @@ router.post("/studreg", async (req, res) => {
   } catch (error) {
     console.error("StudReg Error:", error);
 
-    // Handle mongoose validation errors
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({
@@ -272,7 +297,6 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // Handle duplicate key errors
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -280,7 +304,6 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // Generic server error
     return res.status(500).json({
       success: false,
       message: "Server error: " + error.message
@@ -290,6 +313,7 @@ router.post("/studreg", async (req, res) => {
 
 /* =========================
    GET CANDIDATES BY LEADER
+   Returns registered events and student count
 ========================= */
 router.post("/getcandidates", async (req, res) => {
   try {
@@ -300,26 +324,90 @@ router.post("/getcandidates", async (req, res) => {
     }
 
     const candidates = await EventRegistration.find({
-      leaderId: user_id,
-      registerNumber: { $ne: null }
+      leaderId: user_id
     });
 
-    if (!candidates || candidates.length === 0) {
+    // Calculate statistics
+    const uniqueStudents = new Set(candidates.map(c => c.registerNumber));
+    const registeredEvents = [...new Set(candidates.map(c => c.event))];
+
+    res.json({
+      success: true,
+      total: candidates.length,
+      uniqueStudents: uniqueStudents.size,
+      registeredEvents: registeredEvents,
+      data: candidates
+    });
+
+  } catch (error) {
+    console.error("Get Candidates Error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/* =========================
+   DELETE ENTIRE TEAM FOR AN EVENT
+========================= */
+router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
+  try {
+    const { leaderId, event } = req.params;
+
+    const result = await EventRegistration.deleteMany({
+      leaderId,
+      event
+    });
+
+    if (result.deletedCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "No candidates found"
+        message: "No registrations found for this event"
       });
     }
 
     res.json({
       success: true,
-      total: candidates.length,
-      data: candidates
+      message: `Team deleted successfully. Removed ${result.deletedCount} participant(s).`,
+      deletedCount: result.deletedCount
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("Delete Team Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
+
+/* =========================
+   GET DASHBOARD STATS
+========================= */
+router.get("/stats/:leaderId", async (req, res) => {
+  try {
+    const { leaderId } = req.params;
+
+    const registrations = await EventRegistration.find({ leaderId });
+    
+    const uniqueStudents = new Set(registrations.map(r => r.registerNumber));
+    const registeredEvents = [...new Set(registrations.map(r => r.event))];
+    
+    res.json({
+      success: true,
+      stats: {
+        totalRegistrations: registrations.length,
+        uniqueStudents: uniqueStudents.size,
+        studentsRemaining: 15 - uniqueStudents.size,
+        eventsRegistered: registeredEvents.length,
+        registeredEvents: registeredEvents
+      }
+    });
+
+  } catch (error) {
+    console.error("Stats Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 });
 
@@ -368,6 +456,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
