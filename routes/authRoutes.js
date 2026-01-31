@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const Event = require("../models/Event");
 const College = require("../models/Colleges");
+const EventRegistration = require("../models/EventRegistration");
 
 const router = express.Router();
 
@@ -80,20 +81,6 @@ router.post("/regleader", async (req, res) => {
     });
 
     await newUser.save();
-
-    // 8️⃣ Create 15 empty Event slots
-    // const slots = Array.from({ length: 15 }, () => ({
-    //   leaderId: leaderId,
-    //   name: null,
-    //   registerNumber: null,
-    //   department: null,
-    //   college: null,
-    //   degree: null,
-    //   event1: null,
-    //   event2: null
-    // }));
-
-    // await Event.insertMany(slots);
      
 /* ===================================================
    🔥 UPDATE COLLEGE REGISTERED STATUS (ONLY ONCE)
@@ -156,12 +143,14 @@ router.post("/loginleader", async (req, res) => {
 });
 
 /* =========================
-   STUDENT EVENT REGISTER (PUT)
+   🔥 CHANGED FROM PUT TO POST
+   STUDENT EVENT REGISTER (POST)
 ========================= */
-router.put("/studreg", async (req, res) => {
+router.post("/studreg", async (req, res) => {
   try {
     const { id, name, registerno, degree, event1 } = req.body;
 
+    // Validate required fields
     if (!id || !name || !registerno || !degree || !event1) {
       return res.status(400).json({
         success: false,
@@ -179,6 +168,14 @@ router.put("/studreg", async (req, res) => {
     }
 
     const { college, department } = leader;
+
+    // Check if leader has required fields
+    if (!college || !department) {
+      return res.status(400).json({
+        success: false,
+        message: "Leader profile incomplete. Missing college or department."
+      });
+    }
 
     const EVENT_SLOT_MAP = {
       "Fixathon": "1",
@@ -245,7 +242,7 @@ router.put("/studreg", async (req, res) => {
       });
     }
 
-    // ✅ Save registration
+    // ✅ Create new registration (POST creates new document)
     const entry = await EventRegistration.create({
       leaderId: id,
       name,
@@ -266,6 +263,16 @@ router.put("/studreg", async (req, res) => {
   } catch (error) {
     console.error("StudReg Error:", error);
 
+    // Handle mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed: " + messages.join(", ")
+      });
+    }
+
+    // Handle duplicate key errors
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -273,9 +280,10 @@ router.put("/studreg", async (req, res) => {
       });
     }
 
+    // Generic server error
     return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Server error: " + error.message
     });
   }
 });
@@ -360,6 +368,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
