@@ -82,18 +82,18 @@ router.post("/regleader", async (req, res) => {
     await newUser.save();
 
     // 8️⃣ Create 15 empty Event slots
-    const slots = Array.from({ length: 15 }, () => ({
-      leaderId: leaderId,
-      name: null,
-      registerNumber: null,
-      department: null,
-      college: null,
-      degree: null,
-      event1: null,
-      event2: null
-    }));
+    // const slots = Array.from({ length: 15 }, () => ({
+    //   leaderId: leaderId,
+    //   name: null,
+    //   registerNumber: null,
+    //   department: null,
+    //   college: null,
+    //   degree: null,
+    //   event1: null,
+    //   event2: null
+    // }));
 
-    await Event.insertMany(slots);
+    // await Event.insertMany(slots);
      
 /* ===================================================
    🔥 UPDATE COLLEGE REGISTERED STATUS (ONLY ONCE)
@@ -111,7 +111,7 @@ router.post("/regleader", async (req, res) => {
     // 9️⃣ Success response
     res.status(201).json({
       success: true,
-      message: "Leader registered successfully & 15 slots created",
+      message: "Leader registered successfully",
       userid: leaderId
     });
 
@@ -200,7 +200,7 @@ router.put("/studreg", async (req, res) => {
     }
 
     // 🔍 Fetch existing registrations of this participant
-    const existingRegs = await Event.find({
+    const existingRegs = await EventRegistration.find({
       leaderId: id,
       registerNumber: registerno
     });
@@ -246,7 +246,7 @@ router.put("/studreg", async (req, res) => {
     }
 
     // ✅ Save registration
-    const entry = await Event.create({
+    const entry = await EventRegistration.create({
       leaderId: id,
       name,
       registerNumber: registerno,
@@ -291,7 +291,7 @@ router.post("/getcandidates", async (req, res) => {
       return res.status(400).json({ success: false, message: "User ID required" });
     }
 
-    const candidates = await Event.find({
+    const candidates = await EventRegistration.find({
       leaderId: user_id,
       registerNumber: { $ne: null }
     });
@@ -360,6 +360,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
