@@ -1,11 +1,11 @@
 const mongoose = require("mongoose");
 
 const eventRegistrationSchema = new mongoose.Schema({
-  leaderId: { type: String, required: true },
-  name:     { type: String, required: true },
+  leaderId:       { type: String, required: true },
+  name:           { type: String, required: true },
   registerNumber: { type: String, required: true },
-  mobile:   { type: String, required: true },           // ← added last turn
-  college:  { type: String, required: true },
+  mobile:         { type: String, required: true },
+  college:        { type: String, required: true },
   department: {
     type: String,
     enum: ["cs", "it", "ai", "ds", "ca"],
@@ -16,39 +16,33 @@ const eventRegistrationSchema = new mongoose.Schema({
     enum: ["ug", "pg"],
     required: true
   },
-  event: { type: String, required: true },
-  slot: {
-    type: String,
-    enum: ["1", "2", "BOTH"],
-    required: true
-  }
+
+  // ── First event (always present) ───────────────────────────────
+  event1: { type: String, required: true },
+  slot1:  { type: String, enum: ["1", "2", "BOTH"], required: true },
+
+  // ── Second event (null until student is added to a second event) ─
+  event2: { type: String, default: null },
+  slot2:  { type: String, enum: ["1", "2", "BOTH"], default: null }
+
 }, { timestamps: true });
 
 // ─── INDEXES ─────────────────────────────────────────────────────────────────
-//
-// 1) Unique guard: same student cannot be registered twice for the same event
-//    under the same leader. This is the DB-level safety net that backs the
-//    duplicate-event check in the route.
-//
+
+// 1) One document per student per leader — the main uniqueness guard.
+//    This replaces the old { leaderId, registerNumber, event } unique index.
+//    A student can only have ONE doc under a given leader; their second event
+//    goes into event2 on the SAME doc via an update.
 eventRegistrationSchema.index(
-  { leaderId: 1, registerNumber: 1, event: 1 },
+  { leaderId: 1, registerNumber: 1 },
   { unique: true }
 );
 
-// 2) One-team-per-event lookup:  findOne({ leaderId, event })
-//    Used every time a new registration is attempted to enforce the
-//    "only one team per event per leader" rule.
-//
-eventRegistrationSchema.index(
-  { leaderId: 1, event: 1 }
-);
-
-// 3) Per-student conflict lookups:  find({ leaderId, registerNumber })
-//    Used to pull a student's existing registrations so the route can check
-//    Bid-Mayhem blocking, the 2-event cap, and same-slot clashes.
-//
-eventRegistrationSchema.index(
-  { leaderId: 1, registerNumber: 1 }
-);
+// 2) "One team per event" check queries:
+//        find({ leaderId, event1: eventName })
+//        find({ leaderId, event2: eventName })
+//    Two indexes, one per field.
+eventRegistrationSchema.index({ leaderId: 1, event1: 1 });
+eventRegistrationSchema.index({ leaderId: 1, event2: 1 });
 
 module.exports = mongoose.model("EventRegistration", eventRegistrationSchema);
