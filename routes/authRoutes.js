@@ -149,37 +149,30 @@ router.post("/loginleader", async (req, res) => {
    - Each student max 2 events, no same-slot clash
    - Degree is per-participant (ug/pg mix allowed within a team)
 ========================= */
-router.post("/studreg", async (req, res) => {
+/* =========================
+   REGISTER ENTIRE TEAM (POST)  ← frontend calls THIS
+   Accepts the whole team array in one request.
+   All-or-nothing: if any member fails mid-write, every insert/update
+   in that batch is rolled back before responding.
+========================= */
+router.post("/registerteam", async (req, res) => {
   try {
-    const { id, name, registerno, degree, event1, mobile } = req.body;
+    const { leaderId, event, participants } = req.body;
+    // participants = [{ name, registerNumber, mobile, degree }, ...]
 
-    if (!id || !name || !registerno || !degree || !event1 || !mobile) {
+    if (!leaderId || !event || !Array.isArray(participants) || participants.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required"
+        message: "leaderId, event, and a non-empty participants array are required"
       });
     }
 
-    // ── Mobile validation: 10-digit Indian number ────────────────
-    const mobileRegex = /^[6-9]\d{9}$/;
-    if (!mobileRegex.test(mobile.replace(/[\s\-]/g, ""))) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid mobile number. Please enter a valid 10-digit number starting with 6, 7, 8 or 9."
-      });
-    }
-
-    // Fetch leader
-    const leader = await User.findOne({ userid: id });
+    // ── Fetch leader once ─────────────────────────────────────────
+    const leader = await User.findOne({ userid: leaderId });
     if (!leader) {
-      return res.status(404).json({
-        success: false,
-        message: "Leader not found"
-      });
+      return res.status(404).json({ success: false, message: "Leader not found" });
     }
-
     const { college, department } = leader;
-
     if (!college || !department) {
       return res.status(400).json({
         success: false,
@@ -187,164 +180,206 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
+    // ── Slot map ──────────────────────────────────────────────────
     const EVENT_SLOT_MAP = {
-      "Fixathon": "1",
-      "Mute Masters": "1",
-      "Treasure Titans": "1",
+      "Fixathon": "1", "Mute Masters": "1", "Treasure Titans": "1",
       "Bid Mayhem": "BOTH",
-      "QRush": "2",
-      "VisionX": "2",
-      "ThinkSync": "2",
-      "Crazy Sell": "2"
+      "QRush": "2", "VisionX": "2", "ThinkSync": "2", "Crazy Sell": "2"
     };
-
-    const slot = EVENT_SLOT_MAP[event1];
+    const slot = EVENT_SLOT_MAP[event];
     if (!slot) {
+      return res.status(400).json({ success: false, message: "Invalid event selected" });
+    }
+
+    // ── One team per event per leader ─────────────────────────────
+    const eventAlreadyTaken = await EventRegistration.findOne({
+      leaderId,
+      $or: [{ event1: event }, { event2: event }]
+    });
+    if (eventAlreadyTaken) {
+      return res.status(409).json({
+        success: false,
+        message: `Your team is already registered for ${event}. Only one team per event is allowed.`
+      });
+    }
+
+    // ── Validate every member BEFORE writing anything ────────────
+    const mobileRegex = /^[6-9]\d{9}$/;
+    const regNumbers  = [];
+
+    for (const p of participants) {
+      if (!p.name || !p.registerNumber || !p.mobile || !p.degree) {
+        return res.status(400).json({
+          success: false,
+          message: `Incomplete data for a participant. name, registerNumber, mobile and degree are all required.`
+        });
+      }
+      const cleanMobile = p.mobile.replace(/[\s\-]/g, "");
+      if (!mobileRegex.test(cleanMobile)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid mobile number for ${p.name}. Must be 10 digits starting with 6-9.`
+        });
+      }
+      if (!["ug", "pg"].includes(p.degree)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid degree for ${p.name}. Must be ug or pg.`
+        });
+      }
+      regNumbers.push(p.registerNumber.toUpperCase());
+    }
+
+    // Duplicate reg numbers inside the same incoming team
+    const dupInTeam = regNumbers.filter((r, i) => regNumbers.indexOf(r) !== i);
+    if (dupInTeam.length) {
       return res.status(400).json({
         success: false,
-        message: "Invalid event selected"
+        message: `Duplicate register numbers in team: ${[...new Set(dupInTeam)].join(", ")}`
       });
     }
 
-    // ── One team per event per leader ──────────────────────────────
-    const eventTeamExists = await EventRegistration.findOne({
-      leaderId: id,
-      event: event1
+    // ── Pull existing docs for these students (used for conflict + cap) ─
+    const existingDocs = await EventRegistration.find({
+      leaderId,
+      registerNumber: { $in: regNumbers }
     });
+    const existingRegSet = new Set(existingDocs.map(d => d.registerNumber));
 
-    if (eventTeamExists) {
+    // ── 15-student cap ────────────────────────────────────────────
+    const currentStudentCount = await EventRegistration.countDocuments({ leaderId });
+    const newStudentCount     = regNumbers.filter(r => !existingRegSet.has(r)).length;
+
+    if (currentStudentCount + newStudentCount > 15) {
       return res.status(409).json({
         success: false,
-        message: `Your team is already registered for ${event1}. Only one team per event is allowed.`
+        message: `This would exceed the 15-student limit. Current: ${currentStudentCount}, new in this team: ${newStudentCount}.`
       });
     }
 
-    // ── 15 TOTAL participant slots cap (department limit) ──────────
-    // Every single registration row counts, regardless of whether
-    // the same student appears in another event.
-    const totalRegistrations = await EventRegistration.countDocuments({ leaderId: id });
-
-    if (totalRegistrations >= 15) {
-      return res.status(409).json({
-        success: false,
-        message: `Maximum 15 participants allowed per department. You have already used all 15 slots.`
-      });
+    // ── Per-student conflict checks (all before any write) ───────
+    for (const doc of existingDocs) {
+      // Already in Bid Mayhem → blocked
+      if (doc.event1 === "Bid Mayhem" || doc.event2 === "Bid Mayhem") {
+        return res.status(409).json({
+          success: false,
+          message: `${doc.name} (${doc.registerNumber}) is in Bid Mayhem and cannot register for other events.`
+        });
+      }
+      // Trying to put into Bid Mayhem but already has an event
+      if (slot === "BOTH" && doc.event1) {
+        return res.status(409).json({
+          success: false,
+          message: `${doc.name} (${doc.registerNumber}) already has events. Bid Mayhem cannot be combined.`
+        });
+      }
+      // Already has 2 events
+      if (doc.event2 !== null && doc.event2 !== undefined) {
+        return res.status(409).json({
+          success: false,
+          message: `${doc.name} (${doc.registerNumber}) is already in 2 events: ${doc.event1} & ${doc.event2}.`
+        });
+      }
+      // Same slot clash with their existing event
+      if (doc.slot1 === slot) {
+        return res.status(409).json({
+          success: false,
+          message: `${doc.name} (${doc.registerNumber}) already has ${doc.event1} in the same time slot.`
+        });
+      }
     }
 
-    // ── Per-student conflict checks ────────────────────────────────
-    // Fetch all existing registrations of THIS participant under this leader
-    const existingRegs = await EventRegistration.find({
-      leaderId: id,
-      registerNumber: registerno
-    });
+    // ── All checks passed. Write the whole team. ─────────────────
+    const createdIds  = [];                          // track new docs for rollback
+    const updatedSnap = [];                          // track updates for rollback
 
-    // ❌ Already in Bid Mayhem → block everything else
-    if (existingRegs.some(e => e.slot === "BOTH")) {
-      return res.status(409).json({
+    try {
+      for (const p of participants) {
+        const regUpper    = p.registerNumber.toUpperCase();
+        const cleanMobile = p.mobile.replace(/[\s\-]/g, "");
+        const existing    = existingDocs.find(d => d.registerNumber === regUpper);
+
+        if (existing) {
+          // student already exists → put this event into event2
+          updatedSnap.push({ _id: existing._id, prevEvent2: existing.event2, prevSlot2: existing.slot2 });
+          await EventRegistration.findByIdAndUpdate(existing._id, {
+            $set: { event2: event, slot2: slot }
+          });
+        } else {
+          // brand-new student → create doc with event1
+          const newDoc = await EventRegistration.create({
+            leaderId,
+            name:           p.name,
+            registerNumber: regUpper,
+            mobile:         cleanMobile,
+            college,
+            department,
+            degree:         p.degree,
+            event1:         event,
+            slot1:          slot,
+            event2:         null,
+            slot2:          null
+          });
+          createdIds.push(newDoc._id);
+        }
+      }
+    } catch (writeErr) {
+      // ── ROLLBACK ──────────────────────────────────────────────
+      console.error("Mid-team write failed, rolling back:", writeErr);
+      if (createdIds.length) {
+        await EventRegistration.deleteMany({ _id: { $in: createdIds } });
+      }
+      for (const snap of updatedSnap) {
+        await EventRegistration.findByIdAndUpdate(snap._id, {
+          $set: { event2: snap.prevEvent2, slot2: snap.prevSlot2 }
+        });
+      }
+      return res.status(500).json({
         success: false,
-        message: "Participants in Bid Mayhem cannot register for other events"
+        message: "Team registration failed and was rolled back. Please try again."
       });
     }
-
-    // ❌ Trying to register Bid Mayhem after other events
-    if (slot === "BOTH" && existingRegs.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: "Bid Mayhem cannot be registered along with other events"
-      });
-    }
-
-    // ❌ Max 2 events per student
-    if (existingRegs.length >= 2) {
-      return res.status(409).json({
-        success: false,
-        message: "A participant can register for a maximum of two events"
-      });
-    }
-
-    // ❌ Same time-slot conflict
-    if (existingRegs.some(e => e.slot === slot)) {
-      return res.status(409).json({
-        success: false,
-        message: "Time slot conflict: participant already registered in this slot"
-      });
-    }
-
-    // ❌ Exact duplicate event (safety net)
-    if (existingRegs.some(e => e.event === event1)) {
-      return res.status(409).json({
-        success: false,
-        message: "Participant already registered for this event"
-      });
-    }
-
-    // ✅ Create registration
-    const entry = await EventRegistration.create({
-      leaderId: id,
-      name,
-      registerNumber: registerno,
-      mobile: mobile.replace(/[\s\-]/g, ""),  // store stripped 10-digit string
-      college,
-      department,
-      degree,          // per-participant degree (ug or pg)
-      event: event1,
-      slot
-    });
 
     return res.json({
       success: true,
-      message: "Participant registered successfully",
-      data: entry
+      message: `Team of ${participants.length} registered for ${event}.`,
+      created: createdIds.length,
+      updated: updatedSnap.length
     });
 
   } catch (error) {
-    console.error("StudReg Error:", error);
-
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(e => e.message);
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed: " + messages.join(", ")
-      });
-    }
-
-    if (error.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        message: "Duplicate registration detected"
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Server error: " + error.message
-    });
+    console.error("RegisterTeam Error:", error);
+    return res.status(500).json({ success: false, message: "Server error: " + error.message });
   }
 });
 
+
 /* =========================
    GET CANDIDATES BY LEADER
-   Returns all registrations + total count
+   One doc per student. Each doc has event1 (always)
+   and event2 (null or a second event).
 ========================= */
 router.post("/getcandidates", async (req, res) => {
   try {
     const { user_id } = req.body;
-
     if (!user_id) {
       return res.status(400).json({ success: false, message: "User ID required" });
     }
 
-    const candidates = await EventRegistration.find({
-      leaderId: user_id
+    const students = await EventRegistration.find({ leaderId: user_id });
+
+    // Every event name that already has a team
+    const registeredEvents = new Set();
+    students.forEach(s => {
+      if (s.event1) registeredEvents.add(s.event1);
+      if (s.event2) registeredEvents.add(s.event2);
     });
 
-    const registeredEvents = [...new Set(candidates.map(c => c.event))];
-
     res.json({
-      success: true,
-      total: candidates.length,                // ← total slots used (the 15-cap counter)
-      registeredEvents: registeredEvents,
-      data: candidates
+      success:         true,
+      totalStudents:   students.length,          // ← the 15-cap number
+      registeredEvents: [...registeredEvents],
+      data:            students
     });
 
   } catch (error) {
@@ -353,41 +388,63 @@ router.post("/getcandidates", async (req, res) => {
   }
 });
 
+
 /* =========================
    DELETE ENTIRE TEAM FOR AN EVENT
-   ── ADMIN ONLY route (kept as-is) ──
-   Leader UI no longer exposes this.
+   ── ADMIN ONLY ──
+   Three cases per affected doc:
+     A) event is in event2            → clear event2 + slot2
+     B) event is in event1, event2 exists → shift event2 up to event1, clear event2
+     C) event is in event1, no event2 → delete doc
 ========================= */
 router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
   try {
     const { leaderId, event } = req.params;
 
-    const result = await EventRegistration.deleteMany({
-      leaderId,
-      event
-    });
+    const inEvent1 = await EventRegistration.find({ leaderId, event1: event });
+    const inEvent2 = await EventRegistration.find({ leaderId, event2: event });
 
-    if (result.deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No registrations found for this event"
-      });
+    if (inEvent1.length === 0 && inEvent2.length === 0) {
+      return res.status(404).json({ success: false, message: "No registrations found for this event" });
+    }
+
+    let affected = 0;
+
+    // Case A
+    if (inEvent2.length) {
+      await EventRegistration.updateMany(
+        { leaderId, event2: event },
+        { $set: { event2: null, slot2: null } }
+      );
+      affected += inEvent2.length;
+    }
+
+    // Cases B & C
+    for (const doc of inEvent1) {
+      if (doc.event2) {
+        // B – shift
+        await EventRegistration.findByIdAndUpdate(doc._id, {
+          $set: { event1: doc.event2, slot1: doc.slot2, event2: null, slot2: null }
+        });
+      } else {
+        // C – delete
+        await EventRegistration.findByIdAndDelete(doc._id);
+      }
+      affected++;
     }
 
     res.json({
-      success: true,
-      message: `Team deleted successfully. Removed ${result.deletedCount} participant(s).`,
-      deletedCount: result.deletedCount
+      success:      true,
+      message:      `Team removed from ${event}. ${affected} participant(s) affected.`,
+      deletedCount: affected
     });
 
   } catch (error) {
     console.error("Delete Team Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 
 /* =========================
    GET DASHBOARD STATS
@@ -395,30 +452,29 @@ router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
 router.get("/stats/:leaderId", async (req, res) => {
   try {
     const { leaderId } = req.params;
+    const students = await EventRegistration.find({ leaderId });
 
-    const registrations = await EventRegistration.find({ leaderId });
-
-    const registeredEvents = [...new Set(registrations.map(r => r.event))];
+    const registeredEvents = new Set();
+    students.forEach(s => {
+      if (s.event1) registeredEvents.add(s.event1);
+      if (s.event2) registeredEvents.add(s.event2);
+    });
 
     res.json({
       success: true,
       stats: {
-        totalParticipants: registrations.length,          // total slots used
-        participantsRemaining: 15 - registrations.length, // slots left
-        eventsRegistered: registeredEvents.length,
-        registeredEvents: registeredEvents
+        totalStudents:     students.length,
+        studentsRemaining: 15 - students.length,
+        eventsRegistered:  registeredEvents.size,
+        registeredEvents:  [...registeredEvents]
       }
     });
 
   } catch (error) {
     console.error("Stats Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error"
-    });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
 // POST - Add multiple colleges
 router.post('/addcollege', async (req, res) => {
   try {
@@ -464,6 +520,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
