@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const Admin = require("../models/Admin");
 const Event = require("../models/Event");
 const User = require("../models/User");
+const EventRegistration = require("../models/EventRegistration");
 
 const router = express.Router();
 
@@ -98,32 +99,6 @@ router.post("/viewteam", async (req, res) => {
 });
 
 
-// ================= DELETE TEAM MEMBER =================
-router.post("/deleteteammember", async (req, res) => {
-  try {
-    const { userid, registerNumber } = req.body;
-
-    if (!userid || !registerNumber) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
-    }
-
-    const student = await Event.findOne({ leaderId: userid, registerNumber });
-
-    if (!student) {
-      return res.status(404).json({ success: false, message: "Student not found" });
-    }
-
-    await Event.deleteOne({ leaderId: userid, registerNumber });
-
-    res.status(200).json({ success: true, message: "Student deleted successfully" });
-
-  } catch (error) {
-    console.error("DeleteTeamMember Error:", error);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-});
-
-
 // ================= VIEW EVENT REGISTRATIONS =================
 // Group students by leader for a given event name
 router.post("/vieweventregs", async (req, res) => {
@@ -131,21 +106,27 @@ router.post("/vieweventregs", async (req, res) => {
     const { eventName } = req.body;
 
     if (!eventName) {
-      return res.status(400).json({ success: false, message: "Event name required" });
+      return res.status(400).json({
+        success: false,
+        message: "Event name required"
+      });
     }
 
-    const records = await Event.find({
+    const records = await EventRegistration.find({
       $or: [{ event1: eventName }, { event2: eventName }]
-    });
+    }).lean(); // lean() for faster processing & Excel export safety
 
-    if (records.length === 0) {
-      return res.status(404).json({ success: false, message: "No registrations found" });
+    if (!records.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No registrations found"
+      });
     }
 
-    // Group by leaderId
     const grouped = {};
 
-    for (let rec of records) {
+    for (const rec of records) {
+
       if (!grouped[rec.leaderId]) {
         grouped[rec.leaderId] = {
           leaderId: rec.leaderId,
@@ -158,21 +139,34 @@ router.post("/vieweventregs", async (req, res) => {
       grouped[rec.leaderId].members.push({
         name: rec.name,
         registerNumber: rec.registerNumber,
+        mobile: rec.mobile,
         degree: rec.degree,
+        foodPreference: rec.foodPreference,
+
         event1: rec.event1,
-        event2: rec.event2
+        slot1: rec.slot1,
+
+        event2: rec.event2,
+        slot2: rec.slot2
       });
     }
 
     res.status(200).json({
       success: true,
+      event: eventName,
+      totalTeams: Object.keys(grouped).length,
       data: Object.values(grouped)
     });
 
   } catch (error) {
     console.error("ViewEventRegs Error:", error);
-    res.status(500).json({ success: false, message: "Server Error" });
+    res.status(500).json({
+      success: false,
+      message: "Server Error"
+    });
   }
 });
 
+
 module.exports = router;
+
