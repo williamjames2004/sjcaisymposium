@@ -75,8 +75,7 @@ router.post("/regleader", async (req, res) => {
       department,
       college,
       shift,
-      password: hashedPassword,
-      plainpassword: password // ⚠ dev only
+      password: hashedPassword
     });
 
     await newUser.save();
@@ -143,19 +142,30 @@ router.post("/loginleader", async (req, res) => {
 
 /* =========================
    STUDENT EVENT REGISTER (POST)
-   NEW RULES:
+   RULES:
    - One team per event per leader
-   - Max 15 unique students per leader
-   - Bid Mayhem blocks both slots
+   - Max 15 TOTAL participant slots per leader (department cap)
+   - Bid Mayhem blocks both slots → that student can only be in Bid Mayhem
+   - Each student max 2 events, no same-slot clash
+   - Degree is per-participant (ug/pg mix allowed within a team)
 ========================= */
 router.post("/studreg", async (req, res) => {
   try {
-    const { id, name, registerno, degree, event1 } = req.body;
+    const { id, name, registerno, degree, event1, mobile } = req.body;
 
-    if (!id || !name || !registerno || !degree || !event1) {
+    if (!id || !name || !registerno || !degree || !event1 || !mobile) {
       return res.status(400).json({
         success: false,
         message: "All fields are required"
+      });
+    }
+
+    // ── Mobile validation: 10-digit Indian number ────────────────
+    const mobileRegex = /^[6-9]\d{9}$/;
+    if (!mobileRegex.test(mobile.replace(/[\s\-]/g, ""))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid mobile number. Please enter a valid 10-digit number starting with 6, 7, 8 or 9."
       });
     }
 
@@ -196,7 +206,7 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // 🔥 NEW: Check if this event already has a team registered by this leader
+    // ── One team per event per leader ──────────────────────────────
     const eventTeamExists = await EventRegistration.findOne({
       leaderId: id,
       event: event1
@@ -209,25 +219,26 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // 🔥 NEW: Check total unique students registered by this leader
-    const allRegistrations = await EventRegistration.find({ leaderId: id });
-    const uniqueStudents = new Set(allRegistrations.map(r => r.registerNumber));
-    
-    // If this is a new student (not already in the set), check the limit
-    if (!uniqueStudents.has(registerno) && uniqueStudents.size >= 15) {
+    // ── 15 TOTAL participant slots cap (department limit) ──────────
+    // Every single registration row counts, regardless of whether
+    // the same student appears in another event.
+    const totalRegistrations = await EventRegistration.countDocuments({ leaderId: id });
+
+    if (totalRegistrations >= 15) {
       return res.status(409).json({
         success: false,
-        message: `Maximum 15 unique students allowed per department. You have already registered ${uniqueStudents.size} students.`
+        message: `Maximum 15 participants allowed per department. You have already used all 15 slots.`
       });
     }
 
-    // 🔍 Fetch existing registrations of this participant
+    // ── Per-student conflict checks ────────────────────────────────
+    // Fetch all existing registrations of THIS participant under this leader
     const existingRegs = await EventRegistration.find({
       leaderId: id,
       registerNumber: registerno
     });
 
-    // ❌ Already in Bid Mayhem → block everything
+    // ❌ Already in Bid Mayhem → block everything else
     if (existingRegs.some(e => e.slot === "BOTH")) {
       return res.status(409).json({
         success: false,
@@ -243,15 +254,15 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // ❌ Max 2 events rule per student
+    // ❌ Max 2 events per student
     if (existingRegs.length >= 2) {
       return res.status(409).json({
         success: false,
-        message: "A participant can register for only two events"
+        message: "A participant can register for a maximum of two events"
       });
     }
 
-    // ❌ Same slot conflict
+    // ❌ Same time-slot conflict
     if (existingRegs.some(e => e.slot === slot)) {
       return res.status(409).json({
         success: false,
@@ -259,7 +270,7 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // ❌ Duplicate same event (redundant now due to one-team-per-event check, but keep for safety)
+    // ❌ Exact duplicate event (safety net)
     if (existingRegs.some(e => e.event === event1)) {
       return res.status(409).json({
         success: false,
@@ -267,14 +278,15 @@ router.post("/studreg", async (req, res) => {
       });
     }
 
-    // ✅ Create new registration
+    // ✅ Create registration
     const entry = await EventRegistration.create({
       leaderId: id,
       name,
       registerNumber: registerno,
+      mobile: mobile.replace(/[\s\-]/g, ""),  // store stripped 10-digit string
       college,
       department,
-      degree,
+      degree,          // per-participant degree (ug or pg)
       event: event1,
       slot
     });
@@ -312,7 +324,7 @@ router.post("/studreg", async (req, res) => {
 
 /* =========================
    GET CANDIDATES BY LEADER
-   Returns registered events and student count
+   Returns all registrations + total count
 ========================= */
 router.post("/getcandidates", async (req, res) => {
   try {
@@ -326,14 +338,11 @@ router.post("/getcandidates", async (req, res) => {
       leaderId: user_id
     });
 
-    // Calculate statistics
-    const uniqueStudents = new Set(candidates.map(c => c.registerNumber));
     const registeredEvents = [...new Set(candidates.map(c => c.event))];
 
     res.json({
       success: true,
-      total: candidates.length,
-      uniqueStudents: uniqueStudents.size,
+      total: candidates.length,                // ← total slots used (the 15-cap counter)
       registeredEvents: registeredEvents,
       data: candidates
     });
@@ -346,6 +355,8 @@ router.post("/getcandidates", async (req, res) => {
 
 /* =========================
    DELETE ENTIRE TEAM FOR AN EVENT
+   ── ADMIN ONLY route (kept as-is) ──
+   Leader UI no longer exposes this.
 ========================= */
 router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
   try {
@@ -386,16 +397,14 @@ router.get("/stats/:leaderId", async (req, res) => {
     const { leaderId } = req.params;
 
     const registrations = await EventRegistration.find({ leaderId });
-    
-    const uniqueStudents = new Set(registrations.map(r => r.registerNumber));
+
     const registeredEvents = [...new Set(registrations.map(r => r.event))];
-    
+
     res.json({
       success: true,
       stats: {
-        totalRegistrations: registrations.length,
-        uniqueStudents: uniqueStudents.size,
-        studentsRemaining: 15 - uniqueStudents.size,
+        totalParticipants: registrations.length,          // total slots used
+        participantsRemaining: 15 - registrations.length, // slots left
         eventsRegistered: registeredEvents.length,
         registeredEvents: registeredEvents
       }
@@ -455,6 +464,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
