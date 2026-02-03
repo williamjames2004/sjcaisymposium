@@ -155,10 +155,18 @@ router.post("/loginleader", async (req, res) => {
    All-or-nothing: if any member fails mid-write, every insert/update
    in that batch is rolled back before responding.
 ========================= */
+/* =========================
+   REGISTER ENTIRE TEAM (POST)  ← frontend calls THIS
+   Accepts the whole team array in one request.
+   All-or-nothing: if any member fails mid-write, every insert/update
+   in that batch is rolled back before responding.
+========================= */
 router.post("/registerteam", async (req, res) => {
   try {
     const { leaderId, event, participants } = req.body;
-    // participants = [{ name, registerNumber, mobile, degree }, ...]
+    // participants = [{ name, registerNumber, mobile, degree, foodPreference? }, ...]
+    // foodPreference is present only for brand-new students.
+    // The route figures out who is new vs existing and validates accordingly.
 
     if (!leaderId || !event || !Array.isArray(participants) || participants.length === 0) {
       return res.status(400).json({
@@ -203,17 +211,42 @@ router.post("/registerteam", async (req, res) => {
       });
     }
 
+    // ── Collect & uppercase reg numbers first ─────────────────────
+    const regNumbers = participants.map(p =>
+      (p.registerNumber || "").toUpperCase()
+    );
+
+    // Duplicate reg numbers inside the same incoming team
+    const dupInTeam = regNumbers.filter((r, i) => regNumbers.indexOf(r) !== i);
+    if (dupInTeam.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Duplicate register numbers in team: ${[...new Set(dupInTeam)].join(", ")}`
+      });
+    }
+
+    // ── Pull existing docs NOW — needed to decide which fields are required ─
+    const existingDocs   = await EventRegistration.find({
+      leaderId,
+      registerNumber: { $in: regNumbers }
+    });
+    const existingRegSet = new Set(existingDocs.map(d => d.registerNumber));
+
     // ── Validate every member BEFORE writing anything ────────────
     const mobileRegex = /^[6-9]\d{9}$/;
-    const regNumbers  = [];
 
     for (const p of participants) {
+      const regUpper    = (p.registerNumber || "").toUpperCase();
+      const isExisting  = existingRegSet.has(regUpper);
+
+      // Fields that are always required
       if (!p.name || !p.registerNumber || !p.mobile || !p.degree) {
         return res.status(400).json({
           success: false,
           message: `Incomplete data for a participant. name, registerNumber, mobile and degree are all required.`
         });
       }
+
       const cleanMobile = p.mobile.replace(/[\s\-]/g, "");
       if (!mobileRegex.test(cleanMobile)) {
         return res.status(400).json({
@@ -227,24 +260,24 @@ router.post("/registerteam", async (req, res) => {
           message: `Invalid degree for ${p.name}. Must be ug or pg.`
         });
       }
-      regNumbers.push(p.registerNumber.toUpperCase());
-    }
 
-    // Duplicate reg numbers inside the same incoming team
-    const dupInTeam = regNumbers.filter((r, i) => regNumbers.indexOf(r) !== i);
-    if (dupInTeam.length) {
-      return res.status(400).json({
-        success: false,
-        message: `Duplicate register numbers in team: ${[...new Set(dupInTeam)].join(", ")}`
-      });
+      // foodPreference — required ONLY for brand-new students
+      if (!isExisting) {
+        if (!p.foodPreference) {
+          return res.status(400).json({
+            success: false,
+            message: `Food preference is required for new participant ${p.name}.`
+          });
+        }
+        if (!["vegetarian", "non-vegetarian"].includes(p.foodPreference)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid food preference for ${p.name}. Must be vegetarian or non-vegetarian.`
+          });
+        }
+      }
+      // If isExisting, we simply ignore whatever foodPreference was sent (if any).
     }
-
-    // ── Pull existing docs for these students (used for conflict + cap) ─
-    const existingDocs = await EventRegistration.find({
-      leaderId,
-      registerNumber: { $in: regNumbers }
-    });
-    const existingRegSet = new Set(existingDocs.map(d => d.registerNumber));
 
     // ── 15-student cap ────────────────────────────────────────────
     const currentStudentCount = await EventRegistration.countDocuments({ leaderId });
@@ -259,28 +292,24 @@ router.post("/registerteam", async (req, res) => {
 
     // ── Per-student conflict checks (all before any write) ───────
     for (const doc of existingDocs) {
-      // Already in Bid Mayhem → blocked
       if (doc.event1 === "Bid Mayhem" || doc.event2 === "Bid Mayhem") {
         return res.status(409).json({
           success: false,
           message: `${doc.name} (${doc.registerNumber}) is in Bid Mayhem and cannot register for other events.`
         });
       }
-      // Trying to put into Bid Mayhem but already has an event
       if (slot === "BOTH" && doc.event1) {
         return res.status(409).json({
           success: false,
           message: `${doc.name} (${doc.registerNumber}) already has events. Bid Mayhem cannot be combined.`
         });
       }
-      // Already has 2 events
       if (doc.event2 !== null && doc.event2 !== undefined) {
         return res.status(409).json({
           success: false,
           message: `${doc.name} (${doc.registerNumber}) is already in 2 events: ${doc.event1} & ${doc.event2}.`
         });
       }
-      // Same slot clash with their existing event
       if (doc.slot1 === slot) {
         return res.status(409).json({
           success: false,
@@ -290,8 +319,8 @@ router.post("/registerteam", async (req, res) => {
     }
 
     // ── All checks passed. Write the whole team. ─────────────────
-    const createdIds  = [];                          // track new docs for rollback
-    const updatedSnap = [];                          // track updates for rollback
+    const createdIds  = [];
+    const updatedSnap = [];
 
     try {
       for (const p of participants) {
@@ -300,13 +329,13 @@ router.post("/registerteam", async (req, res) => {
         const existing    = existingDocs.find(d => d.registerNumber === regUpper);
 
         if (existing) {
-          // student already exists → put this event into event2
+          // ── existing student → only event2 changes, foodPreference untouched ─
           updatedSnap.push({ _id: existing._id, prevEvent2: existing.event2, prevSlot2: existing.slot2 });
           await EventRegistration.findByIdAndUpdate(existing._id, {
             $set: { event2: event, slot2: slot }
           });
         } else {
-          // brand-new student → create doc with event1
+          // ── brand-new student → create with foodPreference ────────────────
           const newDoc = await EventRegistration.create({
             leaderId,
             name:           p.name,
@@ -315,6 +344,7 @@ router.post("/registerteam", async (req, res) => {
             college,
             department,
             degree:         p.degree,
+            foodPreference: p.foodPreference,   // ← saved once, here only
             event1:         event,
             slot1:          slot,
             event2:         null,
@@ -368,7 +398,6 @@ router.post("/getcandidates", async (req, res) => {
 
     const students = await EventRegistration.find({ leaderId: user_id });
 
-    // Every event name that already has a team
     const registeredEvents = new Set();
     students.forEach(s => {
       if (s.event1) registeredEvents.add(s.event1);
@@ -377,9 +406,9 @@ router.post("/getcandidates", async (req, res) => {
 
     res.json({
       success:         true,
-      totalStudents:   students.length,          // ← the 15-cap number
+      totalStudents:   students.length,
       registeredEvents: [...registeredEvents],
-      data:            students
+      data:            students          // foodPreference comes back here naturally
     });
 
   } catch (error) {
@@ -392,10 +421,6 @@ router.post("/getcandidates", async (req, res) => {
 /* =========================
    DELETE ENTIRE TEAM FOR AN EVENT
    ── ADMIN ONLY ──
-   Three cases per affected doc:
-     A) event is in event2            → clear event2 + slot2
-     B) event is in event1, event2 exists → shift event2 up to event1, clear event2
-     C) event is in event1, no event2 → delete doc
 ========================= */
 router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
   try {
@@ -410,7 +435,7 @@ router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
 
     let affected = 0;
 
-    // Case A
+    // event is in event2 → clear event2/slot2 only
     if (inEvent2.length) {
       await EventRegistration.updateMany(
         { leaderId, event2: event },
@@ -419,15 +444,15 @@ router.delete("/deleteteam/:leaderId/:event", async (req, res) => {
       affected += inEvent2.length;
     }
 
-    // Cases B & C
+    // event is in event1
     for (const doc of inEvent1) {
       if (doc.event2) {
-        // B – shift
+        // shift event2 up, clear event2
         await EventRegistration.findByIdAndUpdate(doc._id, {
           $set: { event1: doc.event2, slot1: doc.slot2, event2: null, slot2: null }
         });
       } else {
-        // C – delete
+        // no second event → delete doc entirely
         await EventRegistration.findByIdAndDelete(doc._id);
       }
       affected++;
@@ -475,6 +500,7 @@ router.get("/stats/:leaderId", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 // POST - Add multiple colleges
 router.post('/addcollege', async (req, res) => {
   try {
@@ -520,6 +546,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
