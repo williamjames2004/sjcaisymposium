@@ -9,12 +9,6 @@ const router = express.Router();
 /* =========================
    REGISTER LEADER
 ========================= */
-const express = require('express');
-const bcrypt = require('bcrypt');
-const router = express.Router();
-const User = require('./models/User'); // Adjust path as needed
-const College = require('./models/College'); // Adjust path as needed
-
 // Import simple validators
 const {
   validatePassword,
@@ -628,6 +622,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
