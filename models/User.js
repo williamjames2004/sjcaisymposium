@@ -17,8 +17,8 @@ const userSchema = new mongoose.Schema({
     enum: ["1", "2"],
     required: true
   },
-  password: { type: String, required: true },
-  plainpassword: { type: String, required: true }
+  password: { type: String, required: true }
 }, { timestamps: true });
 
 module.exports = mongoose.model("User", userSchema);
+
