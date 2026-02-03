@@ -9,6 +9,24 @@ const router = express.Router();
 /* =========================
    REGISTER LEADER
 ========================= */
+const express = require('express');
+const bcrypt = require('bcrypt');
+const router = express.Router();
+const User = require('./models/User'); // Adjust path as needed
+const College = require('./models/College'); // Adjust path as needed
+
+// Import simple validators
+const {
+  validatePassword,
+  validateEmail,
+  validateMobileNumber,
+  validateName,
+  validateField
+} = require('./simple-validators');
+
+/* =========================
+   REGISTER LEADER
+========================= */
 router.post("/regleader", async (req, res) => {
   try {
     const {
@@ -22,30 +40,78 @@ router.post("/regleader", async (req, res) => {
       confirmpassword
     } = req.body;
 
-    // 1️⃣ Validate input
+    // 1️⃣ Check if all fields are provided
     if (!name || !email || !mobilenumber || !department || !college || !shift || !password || !confirmpassword) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
-    }
-
-    // 2️⃣ Check email uniqueness
-    const emailExists = await User.findOne({ email });
-    if (emailExists) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered"
+      return res.status(400).json({ 
+        success: false, 
+        message: "All fields are required" 
       });
     }
 
-    // 3️⃣ Check college+department+shift uniqueness
-    const groupExists = await User.findOne({ college, department, shift });
-    if (groupExists) {
-      return res.status(400).json({
-        success: false,
-        message: "Leader already exists for this College, Department and Shift"
+    // 2️⃣ Validate Name
+    const nameError = validateName(name);
+    if (nameError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: nameError 
       });
     }
 
-    // 4️⃣ Check password match
+    // 3️⃣ Validate Email
+    const emailError = validateEmail(email);
+    if (emailError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: emailError 
+      });
+    }
+
+    // 4️⃣ Validate Mobile Number
+    const mobileError = validateMobileNumber(mobilenumber);
+    if (mobileError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: mobileError 
+      });
+    }
+
+    // 5️⃣ Validate Department
+    const deptError = validateField(department, "Department");
+    if (deptError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: deptError 
+      });
+    }
+
+    // 6️⃣ Validate College
+    const collegeError = validateField(college, "College");
+    if (collegeError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: collegeError 
+      });
+    }
+
+    // 7️⃣ Validate Shift
+    const shiftError = validateField(shift, "Shift");
+    if (shiftError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: shiftError 
+      });
+    }
+
+    // 8️⃣ Validate Password Strength
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: passwordError 
+      });
+    }
+
+    // 9️⃣ Check password match
     if (password !== confirmpassword) {
       return res.status(400).json({
         success: false,
@@ -53,11 +119,43 @@ router.post("/regleader", async (req, res) => {
       });
     }
 
-    // 5️⃣ Hash password
+    // 🔟 Check email uniqueness
+    const emailExists = await User.findOne({ email: email.trim().toLowerCase() });
+    if (emailExists) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already registered"
+      });
+    }
+
+    // 1️⃣1️⃣ Check mobile number uniqueness
+    const cleanMobile = String(mobilenumber).replace(/\D/g, '');
+    const mobileExists = await User.findOne({ mobilenumber: cleanMobile });
+    if (mobileExists) {
+      return res.status(400).json({
+        success: false,
+        message: "Mobile number already registered"
+      });
+    }
+
+    // 1️⃣2️⃣ Check college+department+shift uniqueness
+    const groupExists = await User.findOne({ 
+      college: college.trim(), 
+      department: department.trim(), 
+      shift: shift.trim() 
+    });
+    if (groupExists) {
+      return res.status(400).json({
+        success: false,
+        message: "Leader already exists for this College, Department and Shift"
+      });
+    }
+
+    // 1️⃣3️⃣ Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 6️⃣ Generate UNIQUE Leader ID
+    // 1️⃣4️⃣ Generate UNIQUE Leader ID
     let leaderId;
     let exists = true;
     while (exists) {
@@ -66,34 +164,32 @@ router.post("/regleader", async (req, res) => {
       exists = !!check;
     }
 
-    // 7️⃣ Create leader
+    // 1️⃣5️⃣ Create leader
     const newUser = new User({
       userid: leaderId,
-      name,
-      email,
-      mobilenumber,
-      department,
-      college,
-      shift,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      mobilenumber: cleanMobile,
+      department: department.trim(),
+      college: college.trim(),
+      shift: shift.trim(),
       password: hashedPassword
     });
 
     await newUser.save();
      
-/* ===================================================
-   🔥 UPDATE COLLEGE REGISTERED STATUS (ONLY ONCE)
-=================================================== */
+    // 1️⃣6️⃣ Update College Registered Status
     await College.updateOne(
       {
-        name: college,                 // or collegeId (preferred)
-        registeredStatus: false        // ✅ condition
+        name: college.trim(),
+        registeredStatus: false
       },
       {
         $set: { registeredStatus: true }
       }
     );
 
-    // 9️⃣ Success response
+    // 1️⃣7️⃣ Success response
     res.status(201).json({
       success: true,
       message: "Leader registered successfully",
@@ -108,6 +204,7 @@ router.post("/regleader", async (req, res) => {
     });
   }
 });
+
 /* =========================
    LOGIN LEADER
 ========================= */
@@ -148,12 +245,6 @@ router.post("/loginleader", async (req, res) => {
    - Bid Mayhem blocks both slots → that student can only be in Bid Mayhem
    - Each student max 2 events, no same-slot clash
    - Degree is per-participant (ug/pg mix allowed within a team)
-========================= */
-/* =========================
-   REGISTER ENTIRE TEAM (POST)  ← frontend calls THIS
-   Accepts the whole team array in one request.
-   All-or-nothing: if any member fails mid-write, every insert/update
-   in that batch is rolled back before responding.
 ========================= */
 /* =========================
    REGISTER ENTIRE TEAM (POST)  ← frontend calls THIS
@@ -546,6 +637,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
