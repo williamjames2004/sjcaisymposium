@@ -1,7 +1,6 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const Admin = require("../models/Admin");
-const Event = require("../models/Event");
 const User = require("../models/User");
 const EventRegistration = require("../models/EventRegistration");
 
@@ -169,5 +168,6 @@ router.post("/vieweventregs", async (req, res) => {
 
 
 module.exports = router;
+
 
 
