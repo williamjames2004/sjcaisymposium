@@ -93,15 +93,6 @@ router.post("/regleader", async (req, res) => {
       });
     }
 
-    // 7️⃣ Validate Shift
-    const shiftError = validateField(shift, "Shift");
-    if (shiftError) {
-      return res.status(400).json({ 
-        success: false, 
-        message: shiftError 
-      });
-    }
-
     // 8️⃣ Validate Password Strength
     const passwordError = validatePassword(password);
     if (passwordError) {
@@ -637,6 +628,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
