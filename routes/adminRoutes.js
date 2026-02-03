@@ -84,7 +84,7 @@ router.post("/viewteam", async (req, res) => {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    const team = await Event.find({ college, department });
+    const team = await EventRegistration.find({ college, department });
 
     if (team.length === 0) {
       return res.status(404).json({ success: false, message: "No team found" });
@@ -169,4 +169,5 @@ router.post("/vieweventregs", async (req, res) => {
 
 
 module.exports = router;
+
 
