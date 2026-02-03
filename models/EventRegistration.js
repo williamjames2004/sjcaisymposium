@@ -17,6 +17,14 @@ const eventRegistrationSchema = new mongoose.Schema({
     required: true
   },
 
+  // ── Food preference — collected once when the student doc is created.
+  //     Never re-asked if the same student is later added to a second event.
+  foodPreference: {
+    type: String,
+    enum: ["vegetarian", "non-vegetarian"],
+    required: true
+  },
+
   // ── First event (always present) ───────────────────────────────
   event1: { type: String, required: true },
   slot1:  { type: String, enum: ["1", "2", "BOTH"], required: true },
@@ -28,20 +36,13 @@ const eventRegistrationSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ─── INDEXES ─────────────────────────────────────────────────────────────────
-
-// 1) One document per student per leader — the main uniqueness guard.
-//    This replaces the old { leaderId, registerNumber, event } unique index.
-//    A student can only have ONE doc under a given leader; their second event
-//    goes into event2 on the SAME doc via an update.
+// 1) One document per student per leader.
 eventRegistrationSchema.index(
   { leaderId: 1, registerNumber: 1 },
   { unique: true }
 );
 
-// 2) "One team per event" check queries:
-//        find({ leaderId, event1: eventName })
-//        find({ leaderId, event2: eventName })
-//    Two indexes, one per field.
+// 2) "One team per event" lookups.
 eventRegistrationSchema.index({ leaderId: 1, event1: 1 });
 eventRegistrationSchema.index({ leaderId: 1, event2: 1 });
 
