@@ -1,7 +1,6 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
-const Event = require("../models/Event");
 const College = require("../models/Colleges");
 const EventRegistration = require("../models/EventRegistration");
 
@@ -456,6 +455,7 @@ router.get('/getcollege', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
