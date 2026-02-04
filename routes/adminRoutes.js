@@ -180,9 +180,12 @@ router.post("/deleteteammember", async (req, res) => {
       });
     }
 
+    // Ensure registerNumber is a string before calling toUpperCase()
+    const regNumberUpper = String(registerNumber).toUpperCase();
+
     const result = await EventRegistration.findOneAndDelete({ 
       leaderId: userid, 
-      registerNumber: registerNumber.toUpperCase() 
+      registerNumber: regNumberUpper 
     });
 
     if (!result) {
