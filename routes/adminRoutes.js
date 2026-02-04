@@ -177,7 +177,8 @@ router.post("/deleteteammember", async (req, res) => {
       return res.status(400).json({ success: false, message: "Leader ID and Register Number are required" });
     }
 
-    const member = await EventRegistration.findOne({ leaderId: userid, registerNumber: registerNumber.toUpperCase() });
+    const regNumberUpper = String(registerNumber).toUpperCase();
+    const member = await EventRegistration.findOne({ leaderId: userid, registerNumber: regNumberUpper });
 
     if (!member) {
       return res.status(404).json({ success: false, message: "Team member not found" });
@@ -187,7 +188,7 @@ router.post("/deleteteammember", async (req, res) => {
 
     res.status(200).json({ 
       success: true, 
-      message: `Team member ${registerNumber} deleted successfully` 
+      message: `Team member ${regNumberUpper} deleted successfully` 
     });
 
   } catch (error) {
@@ -207,13 +208,11 @@ router.delete("/deleteteam/:leaderId", async (req, res) => {
       return res.status(400).json({ success: false, message: "Leader ID is required" });
     }
 
-    const team = await EventRegistration.find({ leaderId });
+    const result = await EventRegistration.deleteMany({ leaderId });
 
-    if (team.length === 0) {
+    if (result.deletedCount === 0) {
       return res.status(404).json({ success: false, message: "No team found for this leader" });
     }
-
-    const result = await EventRegistration.deleteMany({ leaderId });
 
     res.status(200).json({ 
       success: true, 
