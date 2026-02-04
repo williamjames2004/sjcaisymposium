@@ -273,8 +273,89 @@ router.delete("/deleteteambyevent/:leaderId/:event", async (req, res) => {
   }
 });
 
+// ================= GET DASHBOARD STATS =================
+// Get overall registration statistics
+router.get("/dashboardstats", async (req, res) => {
+  try {
+    // Get all registrations
+    const allRegistrations = await EventRegistration.find({});
+
+    // Total members
+    const totalMembers = allRegistrations.length;
+
+    // Food preference counts
+    const vegCount = allRegistrations.filter(r => r.foodPreference === 'vegetarian').length;
+    const nonVegCount = allRegistrations.filter(r => r.foodPreference === 'non-vegetarian').length;
+
+    // Degree counts
+    const ugCount = allRegistrations.filter(r => r.degree === 'ug').length;
+    const pgCount = allRegistrations.filter(r => r.degree === 'pg').length;
+
+    // Unique teams (college + department + leaderId combination)
+    const uniqueTeams = new Set();
+    allRegistrations.forEach(r => {
+      uniqueTeams.add(`${r.college}|${r.department}|${r.leaderId}`);
+    });
+    const totalTeams = uniqueTeams.size;
+
+    // Event-wise counts
+    const eventCounts = {};
+    const events = ["Fixathon", "Mute Masters", "Treasure Titans", "VisionX", "QRush", "ThinkSync", "Bid Mayhem", "Crazy Sell"];
+    
+    events.forEach(event => {
+      const count = allRegistrations.filter(r => r.event1 === event || r.event2 === event).length;
+      eventCounts[event] = count;
+    });
+
+    // College-wise stats
+    const collegeStats = {};
+    allRegistrations.forEach(r => {
+      const key = `${r.college}|${r.department}`;
+      if (!collegeStats[key]) {
+        collegeStats[key] = {
+          college: r.college,
+          department: r.department,
+          members: 0,
+          veg: 0,
+          nonVeg: 0
+        };
+      }
+      collegeStats[key].members++;
+      if (r.foodPreference === 'vegetarian') collegeStats[key].veg++;
+      if (r.foodPreference === 'non-vegetarian') collegeStats[key].nonVeg++;
+    });
+
+    // Department-wise counts
+    const deptCounts = {};
+    allRegistrations.forEach(r => {
+      const dept = r.department || 'unknown';
+      deptCounts[dept] = (deptCounts[dept] || 0) + 1;
+    });
+
+    res.status(200).json({
+      success: true,
+      stats: {
+        totalMembers,
+        totalTeams,
+        vegCount,
+        nonVegCount,
+        ugCount,
+        pgCount,
+        eventCounts,
+        collegeStats: Object.values(collegeStats),
+        deptCounts
+      }
+    });
+
+  } catch (error) {
+    console.error("DashboardStats Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
 
 module.exports = router;
+
 
 
 
