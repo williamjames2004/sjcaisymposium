@@ -167,6 +167,43 @@ router.post("/vieweventregs", async (req, res) => {
 });
 
 
+// ================= DELETE TEAM MEMBER =================
+// Delete a specific team member by leaderId and registerNumber
+router.post("/deleteteammember", async (req, res) => {
+  try {
+    const { userid, registerNumber } = req.body;
+
+    if (!userid || !registerNumber) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Leader ID and Register Number are required" 
+      });
+    }
+
+    const result = await EventRegistration.findOneAndDelete({ 
+      leaderId: userid, 
+      registerNumber: registerNumber.toUpperCase() 
+    });
+
+    if (!result) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Team member not found" 
+      });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: `${result.name} has been removed from the team` 
+    });
+
+  } catch (error) {
+    console.error("DeleteTeamMember Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+
 module.exports = router;
 
 
