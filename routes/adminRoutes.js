@@ -166,8 +166,116 @@ router.post("/vieweventregs", async (req, res) => {
   }
 });
 
+// ================= DELETE TEAM MEMBER =================
+// Delete a single team member by leaderId and registerNumber
+router.post("/deleteteammember", async (req, res) => {
+  try {
+    const { userid, registerNumber } = req.body;
+
+    if (!userid || !registerNumber) {
+      return res.status(400).json({ success: false, message: "Leader ID and Register Number are required" });
+    }
+
+    const member = await EventRegistration.findOne({ leaderId: userid, registerNumber });
+
+    if (!member) {
+      return res.status(404).json({ success: false, message: "Team member not found" });
+    }
+
+    await EventRegistration.findByIdAndDelete(member._id);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `${member.name} (${registerNumber}) deleted successfully` 
+    });
+
+  } catch (error) {
+    console.error("DeleteTeamMember Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+
+// ================= DELETE ENTIRE TEAM =================
+// Delete entire team for a leader (all registrations)
+router.delete("/deleteteam/:leaderId", async (req, res) => {
+  try {
+    const { leaderId } = req.params;
+
+    const team = await EventRegistration.find({ leaderId });
+
+    if (team.length === 0) {
+      return res.status(404).json({ success: false, message: "No team found for this leader" });
+    }
+
+    await EventRegistration.deleteMany({ leaderId });
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Deleted ${team.length} team member(s) for leader ${leaderId}`,
+      deletedCount: team.length
+    });
+
+  } catch (error) {
+    console.error("DeleteTeam Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+
+// ================= DELETE TEAM FROM EVENT =================
+// Remove team's registration from a specific event
+router.delete("/deleteteambyevent/:leaderId/:event", async (req, res) => {
+  try {
+    const { leaderId, event } = req.params;
+
+    const inEvent1 = await EventRegistration.find({ leaderId, event1: event });
+    const inEvent2 = await EventRegistration.find({ leaderId, event2: event });
+
+    if (inEvent1.length === 0 && inEvent2.length === 0) {
+      return res.status(404).json({ success: false, message: "No registrations found for this event" });
+    }
+
+    let affected = 0;
+
+    // event is in event2 → clear event2/slot2 only
+    if (inEvent2.length) {
+      await EventRegistration.updateMany(
+        { leaderId, event2: event },
+        { $set: { event2: null, slot2: null } }
+      );
+      affected += inEvent2.length;
+    }
+
+    // event is in event1
+    for (const doc of inEvent1) {
+      if (doc.event2) {
+        // shift event2 up, clear event2
+        await EventRegistration.findByIdAndUpdate(doc._id, {
+          $set: { event1: doc.event2, slot1: doc.slot2, event2: null, slot2: null }
+        });
+      } else {
+        // no second event → delete doc entirely
+        await EventRegistration.findByIdAndDelete(doc._id);
+      }
+      affected++;
+    }
+
+    res.json({
+      success: true,
+      message: `Team removed from ${event}. ${affected} participant(s) affected.`,
+      deletedCount: affected
+    });
+
+  } catch (error) {
+    console.error("DeleteTeamByEvent Error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 
 module.exports = router;
+
 
 
 
