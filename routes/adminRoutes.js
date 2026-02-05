@@ -354,6 +354,66 @@ router.get("/dashboardstats", async (req, res) => {
 });
 
 
+// ================= DELETE TEAM MEMBER =================
+// Delete a specific team member by leaderId and registerNumber
+router.post("/deleteteammember", async (req, res) => {
+  try {
+    const { userid, registerNumber } = req.body;
+
+    if (!userid || !registerNumber) {
+      return res.status(400).json({ success: false, message: "Leader ID and Register Number are required" });
+    }
+
+    const regNumberUpper = String(registerNumber).toUpperCase();
+    const member = await EventRegistration.findOne({ leaderId: userid, registerNumber: regNumberUpper });
+
+    if (!member) {
+      return res.status(404).json({ success: false, message: "Team member not found" });
+    }
+
+    await EventRegistration.findByIdAndDelete(member._id);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Team member ${regNumberUpper} deleted successfully` 
+    });
+
+  } catch (error) {
+    console.error("DeleteTeamMember Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+
+// ================= DELETE ENTIRE TEAM =================
+// Delete all team members for a specific leader
+router.delete("/deleteteam/:leaderId", async (req, res) => {
+  try {
+    const { leaderId } = req.params;
+
+    if (!leaderId) {
+      return res.status(400).json({ success: false, message: "Leader ID is required" });
+    }
+
+    const result = await EventRegistration.deleteMany({ leaderId });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "No team found for this leader" });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Entire team deleted successfully. ${result.deletedCount} member(s) removed.`,
+      deletedCount: result.deletedCount
+    });
+
+  } catch (error) {
+    console.error("DeleteTeam Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+
 module.exports = router;
 
 
