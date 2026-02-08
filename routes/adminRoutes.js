@@ -166,35 +166,6 @@ router.post("/vieweventregs", async (req, res) => {
   }
 });
 
-// ================= DELETE TEAM MEMBER =================
-// Delete a single team member by leaderId and registerNumber
-router.post("/deleteteammember", async (req, res) => {
-  try {
-    const { userid, registerNumber } = req.body;
-
-    if (!userid || !registerNumber) {
-      return res.status(400).json({ success: false, message: "Leader ID and Register Number are required" });
-    }
-
-    const member = await EventRegistration.findOne({ leaderId: userid, registerNumber });
-
-    if (!member) {
-      return res.status(404).json({ success: false, message: "Team member not found" });
-    }
-
-    await EventRegistration.findByIdAndDelete(member._id);
-
-    res.status(200).json({ 
-      success: true, 
-      message: `${member.name} (${registerNumber}) deleted successfully` 
-    });
-
-  } catch (error) {
-    console.error("DeleteTeamMember Error:", error);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-});
-
 
 // ================= DELETE ENTIRE TEAM =================
 // Delete entire team for a leader (all registrations)
@@ -225,46 +196,52 @@ router.delete("/deleteteam/:leaderId", async (req, res) => {
 
 // ================= DELETE TEAM FROM EVENT =================
 // Remove team's registration from a specific event
+// Only nulls the chosen event for each member; the other event remains intact.
+// If member has only one event (the chosen one), delete entire document.
 router.delete("/deleteteambyevent/:leaderId/:event", async (req, res) => {
   try {
     const { leaderId, event } = req.params;
 
-    const inEvent1 = await EventRegistration.find({ leaderId, event1: event });
-    const inEvent2 = await EventRegistration.find({ leaderId, event2: event });
+    // Find all members under this leader who are registered for this event
+    const members = await EventRegistration.find({
+      leaderId,
+      $or: [{ event1: event }, { event2: event }]
+    });
 
-    if (inEvent1.length === 0 && inEvent2.length === 0) {
+    if (members.length === 0) {
       return res.status(404).json({ success: false, message: "No registrations found for this event" });
     }
 
-    let affected = 0;
+    let updated = 0;
+    let deleted = 0;
 
-    // event is in event2 → clear event2/slot2 only
-    if (inEvent2.length) {
-      await EventRegistration.updateMany(
-        { leaderId, event2: event },
-        { $set: { event2: null, slot2: null } }
-      );
-      affected += inEvent2.length;
-    }
-
-    // event is in event1
-    for (const doc of inEvent1) {
-      if (doc.event2) {
-        // shift event2 up, clear event2
+    for (const doc of members) {
+      if (doc.event1 === event) {
+        if (doc.event2) {
+          // Has 2 events, selected event is in event1 → shift event2 up, clear event2
+          await EventRegistration.findByIdAndUpdate(doc._id, {
+            $set: { event1: doc.event2, slot1: doc.slot2, event2: null, slot2: null }
+          });
+          updated++;
+        } else {
+          // Only 1 event (the selected one) → delete entire document
+          await EventRegistration.findByIdAndDelete(doc._id);
+          deleted++;
+        }
+      } else if (doc.event2 === event) {
+        // Has 2 events, selected event is in event2 → just clear event2
         await EventRegistration.findByIdAndUpdate(doc._id, {
-          $set: { event1: doc.event2, slot1: doc.slot2, event2: null, slot2: null }
+          $set: { event2: null, slot2: null }
         });
-      } else {
-        // no second event → delete doc entirely
-        await EventRegistration.findByIdAndDelete(doc._id);
+        updated++;
       }
-      affected++;
     }
 
     res.json({
       success: true,
-      message: `Team removed from ${event}. ${affected} participant(s) affected.`,
-      deletedCount: affected
+      message: `Team removed from ${event}. ${updated} member(s) updated, ${deleted} member(s) deleted.`,
+      updatedCount: updated,
+      deletedCount: deleted
     });
 
   } catch (error) {
@@ -355,6 +332,7 @@ router.get("/dashboardstats", async (req, res) => {
 
 
 module.exports = router;
+
 
 
 
