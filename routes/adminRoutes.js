@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const Admin = require("../models/Admin");
 const User = require("../models/User");
 const EventRegistration = require("../models/EventRegistration");
+const { verifyAdmin, verifySuperAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -344,6 +345,7 @@ router.get("/dashboardstats", verifyAdmin, async (req, res) => {
 
 
 module.exports = router;
+
 
 
 
