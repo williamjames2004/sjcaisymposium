@@ -1,5 +1,6 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken"); 
 const Admin = require("../models/Admin");
 const User = require("../models/User");
 const EventRegistration = require("../models/EventRegistration");
@@ -8,7 +9,7 @@ const router = express.Router();
 
 
 // ================= ADMIN REGISTER =================
-router.post("/adminreg", async (req, res) => {
+router.post("/adminreg",  verifySuperAdmin, async (req, res) => {
   try {
     const { adminId, name, role, password } = req.body;
 
@@ -60,10 +61,21 @@ router.post("/adminlogin", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid Admin ID or Password" });
     }
 
+    // ✅ GENERATE ADMIN JWT TOKEN
+    const token = jwt.sign(
+      {
+        adminId: admin.adminId,
+        adminRole: admin.role,    // 1 = Super Admin, 2 = Moderator
+        role: "admin"
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "8h" }
+    );
+    
     res.status(200).json({
       success: true,
       role: admin.role,
-      message: admin.role === 1 ? "Super Admin logged in" : "Moderator logged in"
+      message: admin.role === 1 ? "Super Admin logged in" : "Organizer logged in"
     });
 
   } catch (error) {
@@ -75,7 +87,7 @@ router.post("/adminlogin", async (req, res) => {
 
 // ================= VIEW TEAM =================
 // Get all Event documents matching college+department+shift
-router.post("/viewteam", async (req, res) => {
+router.post("/viewteam",  verifyAdmin, async (req, res) => {
   try {
     const { college, department } = req.body;
 
@@ -100,7 +112,7 @@ router.post("/viewteam", async (req, res) => {
 
 // ================= VIEW EVENT REGISTRATIONS =================
 // Group students by leader for a given event name
-router.post("/vieweventregs", async (req, res) => {
+router.post("/vieweventregs", verifyAdmin, async (req, res) => {
   try {
     const { eventName } = req.body;
 
@@ -169,7 +181,7 @@ router.post("/vieweventregs", async (req, res) => {
 
 // ================= DELETE ENTIRE TEAM =================
 // Delete entire team for a leader (all registrations)
-router.delete("/deleteteam/:leaderId", async (req, res) => {
+router.delete("/deleteteam/:leaderId", verifyAdmin, async (req, res) => {
   try {
     const { leaderId } = req.params;
 
@@ -198,7 +210,7 @@ router.delete("/deleteteam/:leaderId", async (req, res) => {
 // Remove team's registration from a specific event
 // Only nulls the chosen event for each member; the other event remains intact.
 // If member has only one event (the chosen one), delete entire document.
-router.delete("/deleteteambyevent/:leaderId/:event", async (req, res) => {
+router.delete("/deleteteambyevent/:leaderId/:event", verifyAdmin, async (req, res) => {
   try {
     const { leaderId, event } = req.params;
 
@@ -252,7 +264,7 @@ router.delete("/deleteteambyevent/:leaderId/:event", async (req, res) => {
 
 // ================= GET DASHBOARD STATS =================
 // Get overall registration statistics
-router.get("/dashboardstats", async (req, res) => {
+router.get("/dashboardstats", verifyAdmin, async (req, res) => {
   try {
     // Get all registrations
     const allRegistrations = await EventRegistration.find({});
@@ -332,6 +344,7 @@ router.get("/dashboardstats", async (req, res) => {
 
 
 module.exports = router;
+
 
 
 
